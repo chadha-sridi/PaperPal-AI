@@ -1,79 +1,81 @@
 import re
 import gradio as gr
 from gradio_modal import Modal
-from pathlib import Path
-from conversationagent import ConversationAgent, embedder
-from langchain_community.vectorstores import FAISS
+from conversationagent import ConversationAgent
 from paperingestion import PaperVectorStore
 
 # ====== Load user docstore ======
 user_id = "demo_user"
 user_store = PaperVectorStore(user_id)
-user_vectorstore = user_store.vectorstore # user vectorstore
-agent = ConversationAgent(user_id=user_id, docstore=user_vectorstore) #TODO: agent should be independent of user ID ? 
+user_vectorstore = user_store.vectorstore
+agent = ConversationAgent(user_id=user_id, docstore=user_vectorstore)
 
-# ====== Loading papers ======
+# ====== Paper utilities ======
 def get_ingested_papers():
-    """Get papers from paper_metadata for sidebar display"""
     papers = []
     for paper_id, metadata in user_store.paper_metadata.items():
         papers.append({
-            'id': paper_id,  # Use arXiv ID as ID
+            'id': paper_id,
             'Title': metadata.get('Title', 'Unknown'),
             'Authors': metadata.get('Authors', ''),
             'Year': metadata.get('Published', 'Unknown'),
-            'Summary' : metadata.get('Summary',''), 
-            'ingested_at' : metadata.get('ingested_at', '')
+            'Summary': metadata.get('Summary', ''),
+            'ingested_at': metadata.get('ingested_at', '')
         })
     papers.sort(key=lambda x: x.get('ingested_at', ''), reverse=True)
     return papers
 
-# ====== Callbacks ======
-def open_paper_detail(paper_id):
-    # Get fresh papers data
+def prepare_dataset_samples():
+    """Prepare papers for gr.Dataset display"""
+    papers = get_ingested_papers()
+    samples = []
+    paper_ids = []
+    
+    for p in papers:
+        # Format: [display_text, paper_id]
+        display = f"{p['Title'][:60]}... • {p['Year']}" if len(p['Title']) > 60 else f"{p['Title']} • {p['Year']}"
+        samples.append([display])
+        paper_ids.append(p['id'])
+    
+    return samples, paper_ids
+
+def open_paper_detail_from_dataset(evt: gr.SelectData, paper_ids_list):
+    """Handle paper selection from dataset"""
+    selected_idx = evt.index
+    if selected_idx >= len(paper_ids_list):
+        return gr.update(visible=True), gr.update(visible=False), "", "", gr.update(), gr.update()
+    
+    paper_id = paper_ids_list[selected_idx]
     metadata = user_store.paper_metadata.get(paper_id, {})
+    
     if not metadata:
         return gr.update(visible=True), gr.update(visible=False), "", "", gr.update(), gr.update()
     
-    pdf_url = metadata.get('pdf_url', "Couldn't load paper") 
-    pdf_html = (
-        f'<iframe src="{pdf_url}" width="100%" height="800px"></iframe>'
-        if pdf_url else "Couldn't load paper"
-    )
-    return (
-        gr.update(visible=False), # main chat visiblity 
-        gr.update(visible=True),  # paper view visibility
-        f"## {metadata.get('Title', 'Unknown')}", # paper_title,    
-        pdf_html, #paper_content
-        gr.update(), # paper_chatbot
-        gr.update() # paper_notes
-    )
-def back_to_main():
-    return gr.update(visible=True), gr.update(visible=False)
+    pdf_url = metadata.get('pdf_url', "Couldn't load paper")
+    pdf_html = f'<iframe src="{pdf_url}" width="100%" height="800px"></iframe>' if pdf_url else "Couldn't load paper"
     
-def open_add_paper_modal():
-                # Reset everything
-                return gr.update(visible=True), [], "", "**Current IDs:** None", gr.update(value="")
+    return (
+        gr.update(visible=False),
+        gr.update(visible=True),
+        f"## {metadata.get('Title', 'Unknown')}",
+        pdf_html,
+        gr.update(),
+        gr.update()
+    )
+
+def back_to_main():
+    return gr.update(visible=True), gr.update(visible=False), "", "", gr.update(), gr.update()
 
 def validate_arxiv_id(arxiv_id: str) -> bool:
-    """
-    Validate if string matches arXiv ID pattern.
-    Supports both old and new arXiv ID formats.
-    """
-    # Enhanced pattern for arXiv IDs
     pattern = r'^(\d{4}\.\d{4,5}(v\d+)?|[a-z]+(-[a-z]+)*/\d{7}(v\d+)?)$'
     return bool(re.match(pattern, arxiv_id))
 
 def parse_ids(text):
-    if not text: 
+    if not text:
         return [], []
-    # split by comma, newline, space
     raw = re.split(r"[,\n\s]+", text)
-    # cleanup + remove empty
     all_entries = [entry.strip(" '\"") for entry in raw if entry.strip(" '\"")]
-    # Separate valid arXiv IDs from invalid ones
-    valid_ids = []
-    invalid_entries = []
+    valid_ids, invalid_entries = [], []
     for entry in all_entries:
         if validate_arxiv_id(entry):
             valid_ids.append(entry)
@@ -84,49 +86,43 @@ def parse_ids(text):
 def submit_papers(text_input):
     valid_ids, invalid_entries = parse_ids(text_input)
     if not valid_ids and not invalid_entries:
-        return "Please enter at least one ArXiv ID", [], gr.update(value="")
-    # Build validation message
+        return "Please enter at least one ArXiv ID", gr.update(value=""), gr.update(), gr.update()
+    
     validation_message = ""
     if invalid_entries:
-        if len(invalid_entries) ==1: 
-            validation_message = f"❌ Entry not matching arXiv ID format was ignored: {', '.join(invalid_entries[0])}"
-        else :
+        if len(invalid_entries) == 1:
+            validation_message = f"❌ Entry not matching arXiv ID format was ignored: {invalid_entries[0]}"
+        else:
             validation_message = f"❌ {len(invalid_entries)} entries not matching arXiv ID format were ignored: {', '.join(invalid_entries[:5])}"
-        if len(invalid_entries) > 5:
-            validation_message += f" ... and {len(invalid_entries) - 5} more"
+            if len(invalid_entries) > 5:
+                validation_message += f" ... and {len(invalid_entries) - 5} more"
         validation_message += "\n\n"
+    
     if not valid_ids:
-        return validation_message + "No valid arXiv IDs to process.", [], gr.update(value="")
-    # Remove duplicates from valid IDs
+        return validation_message + "No valid arXiv IDs to process.", gr.update(value=""), gr.update(), gr.update()
+    
     unique_ids = list(set(valid_ids))
-    # Ingest papers 
     result = user_store.ingest_papers(unique_ids)
-    # Clear the input field after successful submission
+    
+    # Reload vectorstore
+    global user_vectorstore, agent
+    user_vectorstore = user_store.vectorstore
+    agent.docstore = user_vectorstore
+    
     clear_input = gr.update(value="")
-    # Combine validation message with ingestion results
-    final_message = validation_message + result['message']
-    return final_message, [], clear_input
-
-def display_papers(papers_container): 
-    """Dispaly papers in the sidebar"""
-    papers = get_ingested_papers()
-    with papers_container : 
-        for paper in papers:
-            btn = gr.Button(
-                        f"{paper['Title']} • {paper['Year']}",
-                        size="sm",
-                        min_width=200
-                    )
-            btn.click(
-                fn=lambda pid=paper['id']: open_paper_detail(pid),
-                inputs=[],
-                outputs=[main_chat, paper_detail, paper_title, paper_content, paper_chatbot, paper_notes]
-            )
+    final_message = validation_message + result.get('message', "Ingestion completed.")
+    
+    # Update dataset
+    new_samples, new_ids = prepare_dataset_samples()
+    
+    return final_message, clear_input, gr.update(samples=new_samples), new_ids
 
 # ====== Interface ======
 with gr.Blocks(theme=gr.themes.Soft()) as demo:
-    current_paper = gr.State(value=None)
-
+    
+    # State to track paper IDs (needed for dataset click handling)
+    paper_ids_state = gr.State(value=[])
+    
     # ------------------- Main Chat -------------------
     with gr.Column(scale=2) as main_chat:
         gr.Markdown("## PaperPal\nYour AI Research Assistant")
@@ -135,67 +131,79 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
         generalchat = gr.ChatInterface(agent.chat_gen, chatbot=chatbot).queue()
 
     # ------------------- Paper Detail View -------------------
-    with gr.Column(visible=False, elem_id="paper_detail") as paper_detail:
+    with gr.Column(visible=False) as paper_detail:
         with gr.Row():
             back_button = gr.Button("← Back to Chat")
-            with gr.Column(scale=10, min_width=0, elem_id="paper_title_col"):
-                paper_title = gr.Markdown("## Paper Title", elem_id="paper_title_md")
-
-        with gr.Tabs() as paper_tabs:
+            with gr.Column(scale=10, min_width=0):
+                paper_title = gr.Markdown("## Paper Title")
+        
+        with gr.Tabs():
             with gr.TabItem("Read"):
                 paper_content = gr.HTML()
             with gr.TabItem("Chat"):
                 paper_chatbot = gr.Chatbot(type="messages")
-                paper_msg = gr.Textbox(
-                    label="Chat about this paper...",
-                    placeholder="Ask specific questions about this paper",
-                    lines=1
-                )
-                # TODO: Wire paper_msg to paper_chatbot
-
+                paper_msg = gr.Textbox(label="Chat about this paper...", placeholder="Ask questions...", lines=1)
             with gr.TabItem("Notes"):
-                paper_notes = gr.Textbox(
-                    label="Your Notes",
-                    placeholder="Add your notes about this paper...",
-                    lines=10
-                )
+                paper_notes = gr.Textbox(label="Your Notes", placeholder="Add notes...", lines=10)
                 save_notes_btn = gr.Button("Save Notes")
-                # TODO: Save notes per paper
-        #  Back button 
-        back_button.click(fn=back_to_main, outputs=[main_chat, paper_detail])
+
+        back_button.click(
+            fn=back_to_main,
+            outputs=[main_chat, paper_detail, paper_title, paper_content, paper_chatbot, paper_notes]
+        )
 
     # ------------------- Sidebar -------------------
-    with gr.Sidebar() as sidebar:
+    with gr.Sidebar():
         gr.Markdown("## Research Papers")
-        search_box = gr.Textbox(label="Search your paper inventory", placeholder="Search papers...")
-        papers_container = gr.Column()
-        display_papers(papers_container)
-        # Add Paper Modal
+        search_box = gr.Textbox(label="Search papers", placeholder="Search...")
+        
+        # Use Dataset for clickable paper list
+        papers_dataset = gr.Dataset(
+            components=[gr.Textbox(visible=False)],
+            samples=[["Loading papers..."]],  # Placeholder
+            label="Click a paper to view",
+            samples_per_page=10
+        )
+        
+        # Handle dataset clicks
+        papers_dataset.select(
+            fn=open_paper_detail_from_dataset,
+            inputs=[paper_ids_state],
+            outputs=[main_chat, paper_detail, paper_title, paper_content, paper_chatbot, paper_notes]
+        )
+
         add_papers_button = gr.Button("+ Add Papers")
-        with Modal(elem_id="add_paper_modal") as add_paper_modal:
+        with Modal(visible=False) as add_paper_modal:
             gr.Markdown("### Add new papers")
-            # State to store the list of IDs
-            arxiv_ids_state = gr.State(value=[])
-            # Markdown to show current IDs
-            current_ids_display = gr.Markdown("**Current IDs:** None")
-            # Textbox for entering IDs
             arxiv_ids_input = gr.Textbox(
-            label="Enter ArXiv IDs",
-            placeholder="One per line or comma-separated",
-            lines=3)
-            # Confirm and ingest the IDs 
-            submit_btn = gr.Button("Submit") 
-            feedback_markdown = gr.Markdown("") 
+                label="Enter ArXiv IDs",
+                placeholder="One per line or comma-separated",
+                lines=3
+            )
+            feedback_markdown = gr.Markdown("")
+            submit_btn = gr.Button("Submit")
+            
             submit_btn.click(
                 fn=submit_papers,
                 inputs=[arxiv_ids_input],
-                outputs=[feedback_markdown,arxiv_ids_state,arxiv_ids_input]
+                outputs=[feedback_markdown, arxiv_ids_input, papers_dataset, paper_ids_state]
             )
+            
             add_papers_button.click(
-                fn=open_add_paper_modal,
-                inputs=[],
-                outputs=[add_paper_modal, arxiv_ids_state, arxiv_ids_input, current_ids_display, feedback_markdown]
+                fn=lambda: (gr.update(visible=True), "", ""),
+                outputs=[add_paper_modal, arxiv_ids_input, feedback_markdown]
             )
     
+    # ------------------- Load papers on startup -------------------
+    def load_papers_on_start():
+        """Load papers when the app starts/refreshes"""
+        samples, ids = prepare_dataset_samples()
+        return gr.update(samples=samples if samples else [["No papers yet"]]), ids
+    
+    # Trigger on demo load
+    demo.load(
+        fn=load_papers_on_start,
+        outputs=[papers_dataset, paper_ids_state]
+    )
 
 demo.launch()
