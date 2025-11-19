@@ -195,6 +195,13 @@ class PaperVectorStore:
     def get_num_vectors(self) -> int:
         """Return total number of vectors in the store."""
         return self.vectorstore.index.ntotal
+    #Note saving
+    def save_notes(self, paper_id, text):
+        if paper_id not in self.paper_metadata:
+            return False
+        self.paper_metadata[paper_id]["notes"] = text
+        self.save_paper_metadata()  # Your existing JSON save method
+        return True
 
 # === TEST ===
 if __name__ == "__main__":

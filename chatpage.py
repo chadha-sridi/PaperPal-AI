@@ -55,16 +55,17 @@ def open_paper_detail_from_dataset(evt: gr.SelectData, paper_ids_list):
     pdf_html = f'<iframe src="{pdf_url}" width="100%" height="800px"></iframe>' if pdf_url else "Couldn't load paper"
     
     return (
-        gr.update(visible=False),
-        gr.update(visible=True),
-        f"## {metadata.get('Title', 'Unknown')}",
-        pdf_html,
-        gr.update(),
-        gr.update()
+        paper_id,
+        gr.update(visible=False),                   # main_chat visibility
+        gr.update(visible=True),                    # paper_detail visibility
+        f"## {metadata.get('Title', 'Unknown')}",   # paper_title
+        pdf_html,                                   # paper_content
+        gr.update(),                                # paper_chatbot
+        metadata.get('notes', "")                   # paper_notes
     )
 
 def back_to_main():
-    return gr.update(visible=True), gr.update(visible=False), "", "", gr.update(), gr.update()
+    return 'main_chat', gr.update(visible=True), gr.update(visible=False), "", "", gr.update(), gr.update()
 
 def validate_arxiv_id(arxiv_id: str) -> bool:
     pattern = r'^(\d{4}\.\d{4,5}(v\d+)?|[a-z]+(-[a-z]+)*/\d{7}(v\d+)?)$'
@@ -117,16 +118,20 @@ def submit_papers(text_input):
     
     return final_message, clear_input, gr.update(samples=new_samples), new_ids
 
+def save_paper_notes(paper_id, notes):
+    user_store.save_notes(paper_id, notes)
+    return "Notes saved!"
 # ====== Interface ======
 with gr.Blocks(theme=gr.themes.Soft()) as demo:
     
     # State to track paper IDs (needed for dataset click handling)
     paper_ids_state = gr.State(value=[])
+    current_selection = gr.State(value= 'main_chat')
     
     # ------------------- Main Chat -------------------
     with gr.Column(scale=2) as main_chat:
         gr.Markdown("## PaperPal\nYour AI Research Assistant")
-        initial_msg = "Hello! I am a document chat agent here to help you!\n\nHow can I help you?"
+        initial_msg = "Hello! I am PaperPal your chat buddy!\n\nHow can I help you?"
         chatbot = gr.Chatbot(value=[{"role": "assistant", "content": initial_msg}], type="messages")
         generalchat = gr.ChatInterface(agent.chat_gen, chatbot=chatbot).queue()
 
@@ -145,11 +150,18 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
                 paper_msg = gr.Textbox(label="Chat about this paper...", placeholder="Ask questions...", lines=1)
             with gr.TabItem("Notes"):
                 paper_notes = gr.Textbox(label="Your Notes", placeholder="Add notes...", lines=10)
+                feedback_markdown_for_notes = gr.Markdown() 
                 save_notes_btn = gr.Button("Save Notes")
+        
+            save_notes_btn.click(
+            fn=save_paper_notes,
+            inputs=[current_selection, paper_notes],  
+            outputs=[feedback_markdown_for_notes]
+            )
 
         back_button.click(
             fn=back_to_main,
-            outputs=[main_chat, paper_detail, paper_title, paper_content, paper_chatbot, paper_notes]
+            outputs=[current_selection, main_chat, paper_detail, paper_title, paper_content, paper_chatbot, paper_notes]
         )
 
     # ------------------- Sidebar -------------------
@@ -169,7 +181,7 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
         papers_dataset.select(
             fn=open_paper_detail_from_dataset,
             inputs=[paper_ids_state],
-            outputs=[main_chat, paper_detail, paper_title, paper_content, paper_chatbot, paper_notes]
+            outputs=[current_selection, main_chat, paper_detail, paper_title, paper_content, paper_chatbot, paper_notes]
         )
 
         add_papers_button = gr.Button("+ Add Papers")
