@@ -68,7 +68,7 @@ class QueryAnalysis(BaseModel):
 
 def get_query_analysis_prompt() -> str:
     return """
-        Analyze the user query and extract the following information : 
+        Analyze the user query and extract the following information based ONLY on the query: 
 
         Tasks: 
         1. Decide if the query is clear enough to answer.
@@ -124,7 +124,7 @@ def analyze_query(state: State) -> dict:
 
     llm_structured = (
         llm
-        .with_config(temperature=0.2)
+        .with_config(temperature=0.1)
         .with_structured_output(QueryAnalysis)
     )
 
@@ -145,10 +145,10 @@ def analyze_query(state: State) -> dict:
         getattr(analysis.metadataHints, field)
         for field in analysis.metadataHints.model_fields
     )
-
+    rewritten = analysis.rewrittenQuestion.strip() or last_user_msg
     return {
         "questionIsClear": True,
-        "rewrittenQuestion": analysis.rewrittenQuestion,
+        "rewrittenQuestion": rewritten,
         "paperScope": analysis.paperScope,
         "metadataHintPresent": metadata_present,
         "metadataHints": analysis.metadataHints,
