@@ -1,16 +1,25 @@
 import os
 import json
+import logging
 from datetime import datetime
 from typing import List
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import ArxivLoader
 from config import BASE_USER_DATA_DIR, COLLECTION_NAME, embedder, qdrant_client
-from langchain_community.vectorstores import Qdrant
+from qdrant_client import models
+from langchain_qdrant import QdrantVectorStore
+logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
 # TEXT SPLITTER
+CHUNK_SIZE = 1000
+CHUNK_OVERLAP = 100
+MIN_CHUNK_LENGTH = 200
+SEPARATORS = ["\n\n", "\n", ".", ";", ",", " "]
+
 text_splitter = RecursiveCharacterTextSplitter(
-    chunk_size=1000, chunk_overlap=100,
-    separators=["\n\n", "\n", ".", ";", ",", " "],
+    chunk_size=CHUNK_SIZE,
+    chunk_overlap=CHUNK_OVERLAP,
+    separators=SEPARATORS,
 )
 
 # VECTORSTORE CLASS 
@@ -26,10 +35,10 @@ class PaperVectorStore:
         
         self.collection_name = COLLECTION_NAME
         self.qdrant_client = qdrant_client
-        self.vectorstore = Qdrant(
+        self.vectorstore = QdrantVectorStore(
             client=self.qdrant_client,
             collection_name=self.collection_name,
-            embeddings=embedder,
+            embedding=embedder,
         )
 
     def load_paper_metadata(self):
@@ -44,7 +53,7 @@ class PaperVectorStore:
 
     def save_paper_metadata(self):
         with open(self.paper_metadata_path, "w") as f:
-            json.dump(self.paper_metadata, f)
+            json.dump(self.paper_metadata, f, indent=2)
 
     def preprocess(self, doc, arxiv_id) -> List:
         """
@@ -57,7 +66,7 @@ class PaperVectorStore:
         doc.page_content = content
         chunks = []
         for c in text_splitter.split_documents([doc]):
-            if len(c.page_content) > 200: # Filter out tiny chunks
+            if len(c.page_content) > MIN_CHUNK_LENGTH: # Filter out tiny chunks
                 # assign minimal metadata
                 c.metadata = {
                 "user_id": self.user_id,
@@ -67,12 +76,12 @@ class PaperVectorStore:
                 chunks.append(c)
         return chunks
 
-    def update_paper_metadata(self, doc, arxiv_id, len_chunks):
+    def update_paper_metadata(self, doc_metadata, arxiv_id, len_chunks):
         self.paper_metadata[arxiv_id] = {
-                    'Title': doc.metadata.get('Title', 'Unknown'),
-                    'Authors': doc.metadata.get('Authors', []),
-                    'Published': doc.metadata.get('Published', '')[:4] if doc.metadata.get('Published') else 'Unknown',
-                    'Summary': doc.metadata.get('Summary', ''),
+                    'Title': doc_metadata.get('Title', 'Unknown'),
+                    'Authors': doc_metadata.get('Authors', []),
+                    'Published': doc_metadata.get('Published', '')[:4] if doc_metadata.get('Published') else 'Unknown',
+                    'Summary': doc_metadata.get('Summary', ''),
                     'pdf_url': f"https://arxiv.org/pdf/{arxiv_id}.pdf",
                     'total_chunks': len_chunks,
                     'ingested_at': datetime.now().isoformat()  # Track when ingested
@@ -81,79 +90,54 @@ class PaperVectorStore:
 
     def ingest_papers(self, arxiv_ids: List[str]) -> dict:
         """
-        Load multiple ArXiv papers, preprocess, chunk, embed, and add to the vectorstore.
-        Returns:
-            dict: {
-                'successful': list of successfully ingested IDs,
-                'failed': list of failed IDs with reasons,
-                'total_processed': int,
-                'message': str
-            }
+        Ingest multiple ArXiv papers, one by one.
+        Each paper's chunks are added to Qdrant individually, and metadata is updated only if the add succeeds.
+        Returns a dict with success/failure info.
         """
-        successful_ingestions = []
-        failed_ingestions = []  # Track failures with reasons
-        
+        successful = []
+        failed = []
+
         for arxiv_id in arxiv_ids:
-            # Paper already in inventory --> Ignore 
-            if arxiv_id in self.paper_metadata:
-                failed_ingestions.append({'id': arxiv_id, 'reason': 'Paper already ingested'})
+            # Paper already in inventory --> Ignore
+            if arxiv_id in self.paper_metadata: 
+                failed.append({"id": arxiv_id, "reason": "Paper already ingested"})
                 continue
+
             try:
-                print(f"📥 Loading paper {arxiv_id} from ArXiv")
+                logging.info(f"📥 Loading paper {arxiv_id} from ArXiv")
                 docs = ArxivLoader(query=arxiv_id).load()
                 if not docs:
-                    failed_ingestions.append({'id': arxiv_id, 'reason': 'No content found on arXiv'})
+                    failed.append({"id": arxiv_id, "reason": "No content found on ArXiv"})
                     continue
-                    
+
                 doc = docs[0]
                 chunks = self.preprocess(doc, arxiv_id)
-                print(f"🧩 Generated {len(chunks)} chunks for paper {arxiv_id}")
-                    
-                try:
-                    # Update vectorstore and metadata file
-                    self.vectorstore.add_documents(chunks)
-                    self.update_paper_metadata(doc, arxiv_id, len(chunks))
-                    successful_ingestions.append(arxiv_id)
-                except Exception as e:
-                    # If saving fails, mark all as failed
-                    failed_ingestions.append({'id': arxiv_id, 'reason': f'Vector store update failed: {str(e)}'})                             
-         
-            except Exception as e:
-                error_msg = f"Failed to ingest {arxiv_id}: {str(e)}"
-                print(f"❌ {error_msg}")
-                failed_ingestions.append({'id': arxiv_id, 'reason': error_msg})
-                continue
-             
-        # Build comprehensive result message
-        total_processed = len(successful_ingestions) + len(failed_ingestions)
-        
-        if successful_ingestions and not failed_ingestions:
-            count = len(successful_ingestions)
-            message = f"✅ Successfully ingested {count} paper{'s' if count > 1 else ''}!"
-        elif successful_ingestions and failed_ingestions:
-            success_count = len(successful_ingestions)
-            fail_count = len(failed_ingestions)
-            message = (
-                f"✅ Ingested {success_count} paper{'s' if success_count > 1 else ''}, "
-                f"❌ failed {fail_count} paper{'s' if fail_count > 1 else ''}"
-            )
-        elif not successful_ingestions and failed_ingestions:
-            fail_count = len(failed_ingestions)
-            message = f"❌ Failed to ingest {fail_count} paper{'s' if fail_count > 1 else ''}"
-        else:
-            message = "No papers processed"
 
-        # Add details about failures
-        if failed_ingestions:
-            failure_details = "\n".join([f"• {f['id']}: {f['reason']}" for f in failed_ingestions])
-            message += f"\n\nFailed papers:\n{failure_details}"
-        
-        return {
-            'successful': successful_ingestions,
-            'failed': failed_ingestions,
-            'total_processed': total_processed,
-            'message': message
-        }
+                try:
+                    # Add chunks to vector store
+                    self.vectorstore.add_documents(chunks)
+                    # Only update metadata if add succeeds
+                    self.update_paper_metadata(doc.metadata, arxiv_id, len(chunks))
+                    successful.append(arxiv_id)
+                    logging.info(f"✅ Successfully ingested {arxiv_id}")
+                except Exception as e:
+                    failed.append({"id": arxiv_id, "reason": f"Vector store update failed: {e}"})
+
+            except Exception as e:
+                failed.append({"id": arxiv_id, "reason": f"Ingestion failed: {e}"})
+
+        total = len(successful) + len(failed)
+        message = (
+            f"✅ Ingested {len(successful)} paper(s), ❌ failed {len(failed)} paper(s)"
+            if successful and failed
+            else f"✅ Successfully ingested {len(successful)} paper(s)" if successful
+            else f"❌ Failed to ingest {len(failed)} paper(s)"
+        )
+        if failed:
+            details = "\n".join([f"• {f['id']}: {f['reason']}" for f in failed])
+            message += f"\n\nFailed papers:\n{details}"
+
+        return {"successful": successful, "failed": failed, "total_processed": total, "message": message}
 
     def get_num_vectors(self) -> int:
         """Return total number of vectors in the collection."""
@@ -161,7 +145,7 @@ class PaperVectorStore:
             result = self.qdrant_client.count(collection_name=self.collection_name)
             return result.count
         except Exception as e:
-            print(f"⚠️ Failed to fetch vector count: {e}")
+            logging.warning(f"Failed to fetch vector count: {e}")
             return 0
 
     #Note saving
@@ -172,14 +156,50 @@ class PaperVectorStore:
         self.save_paper_metadata()  
         return True
 
+    def delete_paper(self, paper_id: str) -> bool:
+        """
+        Delete all chunks of a given paper from Qdrant and remove its metadata.
+        Returns True if deletion succeeded, False otherwise.
+        """
+        if paper_id not in self.paper_metadata:
+            logging.warning(f"Paper {paper_id} not found in metadata.")
+            return False
+        try:
+            # Create a filter to match user_id and paper_id
+            delete_filter = models.Filter(
+                must=[
+                    models.FieldCondition(key="user_id", match=models.MatchValue(value=self.user_id)),
+                    models.FieldCondition(key="paper_id", match=models.MatchValue(value=paper_id)),
+                ]
+            )
+            # Delete points from vectorstore using filter
+            self.vectorstore.client.delete(
+                collection_name=self.collection_name,
+                points_selector=delete_filter
+            )
+            # Remove metadata
+            del self.paper_metadata[paper_id]
+            self.save_paper_metadata()
+            logging.info(f"✅ Successfully deleted paper {paper_id} and its chunks.")
+            return True
+        
+        except Exception as e:
+            logging.error(f"❌ Failed to delete chunks of {paper_id} from vector store: {e}")
+            return False
+
 # === TEST ===
 if __name__ == "__main__":
     user_store = PaperVectorStore(user_id="demo_user")
     # Ingest multiple papers at once
-    user_store.ingest_papers([
+    result = user_store.ingest_papers([
         "1706.03762",  # Attention Is All You Need
         "1810.04805",  # BERT
         "2005.11401",  # RAG
+        "2512.04148",
+        "2509.19391",
+        "2303.08774"
     ])
-    
-    print(f"Total vectors stored: {user_store.get_num_vectors()}")
+    logging.info(result)
+    logging.info(f"Total vectors stored: {user_store.get_num_vectors()}")
+    user_store.delete_paper("1810.04805")
+  
