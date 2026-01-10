@@ -1,5 +1,6 @@
 import re
 import json 
+from schemas import State
 from pathlib import Path
 from rapidfuzz import fuzz
 from statistics import mean
@@ -26,7 +27,7 @@ def normalize_query_years(q_years: List[str], recent_window: int = 3) -> Set[int
             )
     return normalized_q_years 
 
-def FuzzyMagic(metadata_json: Dict[str, Dict], query_hints: Dict, top_n: int = 4) -> List[str]:
+def FuzzyMagic(state: State, metadata_json: Dict[str, Dict], top_n: int = 4) -> List[str]:
     """
     Select top-N paper IDs based on fuzzy matching between query hints and paper metadata.
     Args:
@@ -36,10 +37,13 @@ def FuzzyMagic(metadata_json: Dict[str, Dict], query_hints: Dict, top_n: int = 4
     Returns:
         List of top-N paper IDs ranked by fuzzy matching score
     """
+    query_hints = state.get("metadataHints")
     # Return empty if no hints provided
-    if not any(query_hints.get(k) for k in ["titles", "authors", "topics", "publicationYears"]):
-        return []
-    
+    if not any([
+        query_hints.titles, query_hints.authors, query_hints.topics, query_hints.publicationYears
+    ]):
+        return {"arxivIDs": []}
+
     # Weights for each field
     weights = {
         "titles": 5.0,
@@ -48,10 +52,10 @@ def FuzzyMagic(metadata_json: Dict[str, Dict], query_hints: Dict, top_n: int = 4
         "publicationYears": 1.0
     }
     total_weight = sum(weights.values())
-    q_titles = [t.lower().strip() for t in query_hints.get("titles", []) if t.strip()]
-    q_topics = [t.lower().strip() for t in query_hints.get("topics", []) if t.strip()]
-    q_authors = [a.lower().strip() for a in query_hints.get("authors", []) if a.strip()][:3]
-    q_years = [y.lower().strip() for y in query_hints.get("publicationYears", []) if y.strip()]
+    q_titles = [t.lower().strip() for t in query_hints.titles if t.strip()]
+    q_topics = [t.lower().strip() for t in query_hints.topics if t.strip()]
+    q_authors = [a.lower().strip() for a in query_hints.authors if a.strip()][:3]
+    q_years = [y.lower().strip() for y in query_hints.publicationYears if y.strip()]
     normalized_q_years =  normalize_query_years(q_years) 
     
     # Minimum score threshold 
@@ -106,26 +110,29 @@ def FuzzyMagic(metadata_json: Dict[str, Dict], query_hints: Dict, top_n: int = 4
         
     # Fallback if no matches
     if not primary_scores:
-        return [] 
+        return {"arxivIDs": []} 
     preselected_papers = sorted(primary_scores, key=lambda pid: primary_scores[pid], reverse=True)[:top_n]
     # Sort by score descending and return top_n
     top_papers = sorted(preselected_papers, key=lambda pid: scores[pid], reverse=True)[:top_n]
-    return top_papers
+    return {"arxivIDs": top_papers}
 
 if __name__ == "__main__":
-    paper_metadata_path = Path("vectorstores/demo_user/paper_metadata.json")
+    paper_metadata_path = Path("user_data/demo_user/paper_metadata.json")
      
     with open(paper_metadata_path, "r") as f:
         metadata_json = json.load(f)
 
-    # === Example query hints extracted from the LLM ===
-    query_hints = {
-        "titles": ["Attention is all you need"],
-        "authors": [""],
-        "topics": ["attention mechanism", "language modeling"],
-        "publicationYears": [""]
-    }
-    # === Run the filtering function ===
-    top_papers = FuzzyMagic(metadata_json, query_hints, top_n=4)
-    # === Print the result ===
-    print("Top papers by fuzzy matching:", top_papers)
+    # # === Example query hints extracted from the LLM ===
+    from query_analysis import analyze_query 
+    from langchain_core.messages import HumanMessage
+    examples = [
+    "Can you summarize the key contributions of the Attention Is All You Need paper?",
+    "How do diffusion models compare to GANs for image generation in recent computer vision papers?",
+    ]
+    for i, query in enumerate(examples, start=1):
+        # Initialize a fresh state
+        state = State(messages=[HumanMessage(content=query)])
+        # Run query analysis
+        updated_state = analyze_query(state)
+        top_papers = FuzzyMagic(updated_state, metadata_json, top_n=4)
+        print("Top papers by fuzzy matching:", top_papers)
