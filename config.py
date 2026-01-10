@@ -29,5 +29,21 @@ if COLLECTION_NAME not in existing_collections:
         collection_name=COLLECTION_NAME,
         vectors_config=models.VectorParams(size=EMBED_DIM, distance=models.Distance.COSINE)
     )
+    # Indexing payloads 
+    qdrant_client.create_payload_index(
+    collection_name=COLLECTION_NAME,
+    field_name="user_id",  
+    field_schema="keyword" 
+    )
+    qdrant_client.create_payload_index(
+    collection_name=COLLECTION_NAME,
+    field_name="paper_id",  
+    field_schema="keyword"
+    )
+    qdrant_client.create_payload_index(
+    collection_name=COLLECTION_NAME,
+    field_name="title",  
+    field_schema="text"
+    )
 
 BASE_USER_DATA_DIR = Path("user_data")
