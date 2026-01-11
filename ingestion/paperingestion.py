@@ -3,8 +3,9 @@ import json
 import logging
 from typing import List
 from datetime import datetime
-from qdrant_client import QdrantClient, models
 from langchain_qdrant import QdrantVectorStore
+from qdrant_client import QdrantClient, models
+from langchain_core.embeddings import Embeddings
 from config import BASE_USER_DATA_DIR, COLLECTION_NAME
 from langchain_community.document_loaders import ArxivLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -24,7 +25,7 @@ text_splitter = RecursiveCharacterTextSplitter(
 
 # VECTORSTORE CLASS 
 class PaperVectorStore:
-    def __init__(self, user_id: str, qdrant_client: QdrantClient, embedder):
+    def __init__(self, user_id: str, qdrant_client: QdrantClient, embedder: Embeddings):
         self.user_id = user_id
 
         self.user_dir = BASE_USER_DATA_DIR / user_id
