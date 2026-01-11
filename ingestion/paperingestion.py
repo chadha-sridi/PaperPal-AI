@@ -186,20 +186,3 @@ class PaperVectorStore:
         except Exception as e:
             logging.error(f"❌ Failed to delete chunks of {paper_id} from vector store: {e}")
             return False
-
-# === TEST ===
-if __name__ == "__main__":
-    user_store = PaperVectorStore(user_id="demo_user")
-    # Ingest multiple papers at once
-    result = user_store.ingest_papers([
-        "1706.03762",  # Attention Is All You Need
-        "1810.04805",  # BERT
-        "2005.11401",  # RAG
-        "2512.04148",
-        "2509.19391",
-        "2303.08774"
-    ])
-    logging.info(result)
-    logging.info(f"Total vectors stored: {user_store.get_num_vectors()}")
-    user_store.delete_paper("1810.04805")
-  
