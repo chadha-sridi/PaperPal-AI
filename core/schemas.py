@@ -1,6 +1,8 @@
-from langgraph.graph import MessagesState
+from dataclasses import dataclass, field
 from pydantic import BaseModel, Field
-from typing import Optional, Literal, List
+from langgraph.graph import MessagesState
+from typing import Optional, Literal, List, Dict, Any
+from langchain_qdrant import QdrantVectorStore
 
 class MetadataHints(BaseModel):
     titles: List[str] = Field(
@@ -36,6 +38,16 @@ class State(MessagesState):
     confidenceScores: List[float] = []
     relevancePassed: bool = True
     finalAnswer: Optional[str]
+
+@dataclass
+class RuntimeContext:
+    user_id: str
+    vectorstore: QdrantVectorStore       
+    metadata: Dict[str, Any]  
+    settings: Dict[str, Any] = field(default_factory=lambda: {
+        "retrieval_score_threshold": 0.45,
+        "retrieval_top_k": 5
+    })
 
 class QueryAnalysis(BaseModel):
     is_clear: bool = Field(
