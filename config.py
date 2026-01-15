@@ -2,6 +2,7 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 from qdrant_client import QdrantClient, models
+from qdrant_client.models import PayloadSchemaType
 from langchain_nvidia_ai_endpoints import ChatNVIDIA
 from langchain_nvidia_ai_endpoints import NVIDIAEmbeddings
 load_dotenv()
@@ -29,23 +30,25 @@ existing_collections = [c.name for c in qdrant_client.get_collections().collecti
 if COLLECTION_NAME not in existing_collections:
     qdrant_client.create_collection(
         collection_name=COLLECTION_NAME,
-        vectors_config=models.VectorParams(size=EMBED_DIM, distance=models.Distance.COSINE)
+        vectors_config=models.VectorParams(size=EMBED_DIM, distance=models.Distance.COSINE), 
+        strict_mode_config=models.StrictModeConfig(
+        unindexed_filtering_retrieve=True)
     )
     # Indexing payloads 
     qdrant_client.create_payload_index(
-    collection_name=COLLECTION_NAME,
-    field_name="user_id",  
-    field_schema="keyword" 
+        collection_name=COLLECTION_NAME,
+        field_name="metadata.user_id",
+        field_schema=PayloadSchemaType.KEYWORD,
     )
     qdrant_client.create_payload_index(
-    collection_name=COLLECTION_NAME,
-    field_name="paper_id",  
-    field_schema="keyword"
+        collection_name=COLLECTION_NAME,
+        field_name="metadata.paper_id",
+        field_schema=PayloadSchemaType.KEYWORD,
     )
     qdrant_client.create_payload_index(
-    collection_name=COLLECTION_NAME,
-    field_name="title",  
-    field_schema="text"
+        collection_name=COLLECTION_NAME,
+        field_name="metadata.title",
+        field_schema=PayloadSchemaType.TEXT,
     )
 
 BASE_USER_DATA_DIR = Path("user_data")
