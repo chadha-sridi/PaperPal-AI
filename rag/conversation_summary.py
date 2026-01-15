@@ -2,7 +2,7 @@ from config import llm
 from core.schemas import State 
 from core.prompts import get_conversation_summary_prompt
 
-def analyze_chat_and_summarize(state: State):
+def summarize_conversation_history(state: State):
     """
     Summarize conversation history.
     """

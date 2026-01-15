@@ -1,11 +1,10 @@
 import re
-import json 
-from core.schemas import State
-from pathlib import Path
+from core.schemas import State, RuntimeContext
 from rapidfuzz import fuzz
 from statistics import mean
 from datetime import datetime
 from typing import List, Dict, Set
+from langgraph.runtime import Runtime 
 
 def extract_year(published):
     m = re.search(r"\d{4}", published)
@@ -27,17 +26,19 @@ def normalize_query_years(q_years: List[str], recent_window: int = 3) -> Set[int
             )
     return normalized_q_years 
 
-def FuzzyMagic(state: State, metadata_json: Dict[str, Dict], top_n: int = 4) -> List[str]:
+def fuzzy_match_papers(state: State, runtime: Runtime[RuntimeContext]) -> Dict[str, List[str]]:
     """
     Select top-N paper IDs based on fuzzy matching between query hints and paper metadata.
     Args:
-        metadata_json: {paper_id: {Title, Authors, Summary, Published, ...}}
-        query_hints: {'titles': [...], 'authors': [...], 'topics': [...], 'publicationYears': [...]}
-        top_n: number of top papers to return
+        LangGraph state to retrieve query_hints: {'titles': [...], 'authors': [...], 'topics': [...], 'publicationYears': [...]}
+        Runtime Context to retrieve user's metadata: {paper_id: {Title, Authors, Summary, Published, ...}}
     Returns:
-        List of top-N paper IDs ranked by fuzzy matching score
+        top-N paper IDs ranked by fuzzy matching score
     """
     query_hints = state.get("metadataHints")
+    metadata = runtime.context.metadata
+    scope = state.get("paperScope", "multiple") 
+    top_n = 2 if scope == "single" else 4 
     # Return empty if no hints provided
     if not any([
         query_hints.titles, query_hints.authors, query_hints.topics, query_hints.publicationYears
@@ -62,7 +63,7 @@ def FuzzyMagic(state: State, metadata_json: Dict[str, Dict], top_n: int = 4) -> 
     MIN_THRESHOLD = 0.1
     primary_scores = {} # Preselecting papers based on title and topics 
     scores = {} # Ordering based on total score 
-    for paper_id, paper_data in metadata_json.items():
+    for paper_id, paper_data in metadata.items():
         primary_score = 0.0
         # --- Fuzzy match titles ---
         if q_titles:
