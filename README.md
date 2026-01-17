@@ -1,6 +1,6 @@
-# 📚 PaperPal – AI Research Assistant
+# 📚 ArXivHub – AI Research Assistant
 
-PaperPal is a **RAG-based** research assistant designed to help users:
+ArXivHub is a **RAG-based** research assistant designed to help users:
 
 - ingest and store academic papers,
 - search and browse their personal paper inventory,
