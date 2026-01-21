@@ -37,8 +37,9 @@ def generate(state: State):
         )
     
     context_xml = "\n".join(context_blocks)
+    conversation_summary = state.get("conversationSummary", "")
 
-    system_prompt = get_generation_prompt(context_xml)
+    system_prompt = get_generation_prompt(context_xml, conversation_summary)
     user_question = state.get("rewrittenQuestion") or state.get("originalQuestion")
     response = llm.invoke([
         SystemMessage(content=system_prompt),
