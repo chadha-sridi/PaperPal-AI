@@ -1,5 +1,5 @@
 import re
-from config import llm
+from config import research_llm
 from core.schemas import State
 from core.prompts import get_generation_prompt
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -41,7 +41,7 @@ def generate(state: State):
 
     system_prompt = get_generation_prompt(context_xml, conversation_summary)
     user_question = state.get("rewrittenQuestion") or state.get("originalQuestion")
-    response = llm.invoke([
+    response = research_llm.invoke([
         SystemMessage(content=system_prompt),
         HumanMessage(content=user_question)
     ])

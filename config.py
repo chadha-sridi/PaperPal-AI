@@ -4,8 +4,7 @@ from dotenv import load_dotenv
 from qdrant_client import QdrantClient, models
 from langchain_qdrant import QdrantVectorStore
 from qdrant_client.models import PayloadSchemaType
-from langchain_nvidia_ai_endpoints import ChatNVIDIA
-from langchain_nvidia_ai_endpoints import NVIDIAEmbeddings
+from langchain_nvidia_ai_endpoints import NVIDIAEmbeddings, ChatNVIDIA
 load_dotenv()
 
 # Env variables
@@ -20,6 +19,7 @@ embedder = NVIDIAEmbeddings(model=EMBEDDING_MODEL, truncate="END")
 EMBED_DIM = len(embedder.embed_query("test"))
 # LLM
 llm = ChatNVIDIA(model="meta/llama-3.2-3b-instruct")
+research_llm = ChatNVIDIA(model="nvidia/nemotron-3-nano-30b-a3b")
 
 # Qdrant client
 qdrant_client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY, timeout=300)
