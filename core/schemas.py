@@ -39,6 +39,7 @@ class State(MessagesState):
     retrievedDocs: List[Document] = []
     confidenceScores: List[float] = []
     relevancePassed: bool = True
+    unanswered: str = "" # Stores the specific gap query for Tavily
     finalAnswer: Optional[str]
 
 @dataclass
@@ -71,3 +72,13 @@ class QueryAnalysis(BaseModel):
         default_factory=MetadataHints,
         description="metadata (titles, authors, topics, publication years) mentionned in the user query"
     )
+
+class DocRelevance(BaseModel):
+    """Grade a single document's relevance to the question."""
+    grade: Literal["fully answers the question", "partially answers the question", "completely irrelevant"]
+    reasoning: str = Field(description="Briefly explain why this grade was given.")
+
+class CollectiveAudit(BaseModel):
+    """Audit the combined context to find unanswered aspects."""
+    relevance_passed: bool = Field(description="True if ALL aspects of the question are answered.")
+    unanswered_aspect: Optional[str] = Field(description="A concise question focusing on the missing info.")
