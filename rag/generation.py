@@ -25,9 +25,13 @@ async def generate(state: State):
     docs = state["retrievedDocs"]
     context_blocks = []
     for i, doc in enumerate(docs):
-        arxiv_id = doc.metadata.get("paper_id", f"Unknown_{i}")
-        title = doc.metadata.get("title", f"Untitled_{i}")
-        source = f"{arxiv_id}: {title}"
+        paper_id = doc.metadata.get("paper_id", f"Unknown_{i}")
+        if paper_id == "web_search":
+            # For Tavily we use the URL as the source
+            source = doc.metadata.get("source", "Web Search")
+        else : 
+            title = doc.metadata.get("title", f"Untitled_{i}")
+            source = f"{paper_id}: {title}"
 
         context_blocks.append(
             f'<document index="{i+1}">\n'
