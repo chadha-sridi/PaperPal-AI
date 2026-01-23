@@ -39,7 +39,6 @@ def open_paper_detail_from_dataset(
     paper_ids_list: List[str]
     ) -> Tuple[Any, ...]:    
     """Handle paper selection from dataset"""
-    # selected_idx = evt.index
     selected_idx = evt.index[0] if isinstance(evt.index, (list, tuple)) else evt.index
     if selected_idx >= len(paper_ids_list):
         return None, gr.update(visible=True), gr.update(visible=False), "", "", gr.update(), ""
@@ -83,11 +82,11 @@ def parse_ids(text: str) -> Tuple[List[str], List[str]]:
             invalid_entries.append(entry)
     return valid_ids, invalid_entries
 
-def submit_papers(
+async def submit_papers(
     user_id: str, 
     user_paper_metadata: Dict[str, Any],
     text_input: str
-    ) -> Tuple[str, Any, Any, List[str]]:
+    ) -> Tuple[str, Any, Any, List[str], Dict]:
 
     valid_ids, invalid_entries = parse_ids(text_input)
     if not valid_ids and not invalid_entries:
@@ -107,7 +106,7 @@ def submit_papers(
         return validation_message + "No valid arXiv IDs to process.", gr.update(value=""), gr.update(), gr.update(), user_paper_metadata
     
     unique_ids = list(set(valid_ids))
-    result = ingest_papers(user_id, user_paper_metadata, ArxivHubVectorstore ,unique_ids)
+    result = await ingest_papers(user_id, user_paper_metadata, ArxivHubVectorstore ,unique_ids)
     
     clear_input = gr.update(value="")
     final_message = validation_message + result.get('message', "Ingestion completed.")
@@ -117,8 +116,17 @@ def submit_papers(
     
     return final_message, clear_input, gr.update(samples=new_samples), new_ids, user_paper_metadata
 
-def save_paper_notes(user_id: str, user_paper_metadata: Dict[str, Any], paper_id: str, notes: str):
-    save_notes(user_id, user_paper_metadata, paper_id, notes)
-    return "Notes saved!"
+async def save_paper_notes(user_id: str, user_paper_metadata: Dict[str, Any], paper_id: str, notes: str):
+    await save_notes(user_id, user_paper_metadata, paper_id, notes)
+    return "Notes saved successfully!"
 
-#TODO add delete_paper
+async def handle_delete_paper(user_id: str, user_paper_metadata: Dict[str, Any], paper_id: str):
+    if not paper_id or paper_id == 'main_chat':
+        return "Select a paper first", gr.update()
+        
+    success = await delete_paper(user_id, user_paper_metadata, ArxivHubVectorstore, paper_id)
+    
+    if success:
+        new_samples, new_ids = prepare_dataset_samples(user_paper_metadata)
+        return "🗑️ Paper deleted", gr.update(samples=new_samples), new_ids, 'main_chat'
+    return "❌ Delete failed", gr.update(), gr.update(), gr.update()
