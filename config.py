@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 from dotenv import load_dotenv
+from tavily import AsyncTavilyClient
 from qdrant_client import QdrantClient, models
 from langchain_qdrant import QdrantVectorStore
 from qdrant_client.models import PayloadSchemaType
@@ -13,6 +14,7 @@ EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL")
 QDRANT_URL = os.getenv("QDRANT_URL")
 QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
 BASE_USER_DATA_DIR = Path("user_data")
+TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
 
 # Embedder
 embedder = NVIDIAEmbeddings(model=EMBEDDING_MODEL, truncate="END")
@@ -20,6 +22,9 @@ EMBED_DIM = len(embedder.embed_query("test"))
 # LLM
 llm = ChatNVIDIA(model="meta/llama-3.2-3b-instruct")
 research_llm = ChatNVIDIA(model="nvidia/nemotron-3-nano-30b-a3b")
+
+# Initialize the tavily client
+tavily = AsyncTavilyClient(api_key=TAVILY_API_KEY)
 
 # Qdrant client
 qdrant_client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY, timeout=300)
