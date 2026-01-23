@@ -4,7 +4,7 @@ from langgraph.runtime import Runtime
 from qdrant_client.models import Filter, FieldCondition, MatchValue, MatchAny
 
 
-def retrieve(state: State, runtime: Runtime[RuntimeContext]) -> Dict[str, List]:
+async def retrieve(state: State, runtime: Runtime[RuntimeContext]) -> Dict[str, List]:
     """
     Retrieve relevant chunks and update state.
     """
@@ -28,7 +28,7 @@ def retrieve(state: State, runtime: Runtime[RuntimeContext]) -> Dict[str, List]:
             FieldCondition(key="metadata.paper_id", match=MatchAny(any=arxiv_ids))
         )
    
-    docs_with_scores = vectorstore.similarity_search_with_score(
+    docs_with_scores = await vectorstore.asimilarity_search_with_score(
         query,
         k=top_K,
         filter=Filter(must=conditions)

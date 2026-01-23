@@ -1,6 +1,7 @@
 import os
 import json
 import logging
+import asyncio
 from typing import List, Dict, Any
 from datetime import datetime
 from qdrant_client import models
@@ -23,7 +24,7 @@ text_splitter = RecursiveCharacterTextSplitter(
     separators=SEPARATORS,
 )
 
-def load_paper_metadata(user_id: str) -> Dict[str, Any]:
+async def load_paper_metadata(user_id: str) -> Dict[str, Any]:
     """Load paper metadata from JSON file."""
     
     user_dir = BASE_USER_DATA_DIR / user_id
@@ -31,18 +32,22 @@ def load_paper_metadata(user_id: str) -> Dict[str, Any]:
     paper_metadata_path = user_dir / "paper_metadata.json"
     if paper_metadata_path.exists():
         try:
-            with open(paper_metadata_path, "r") as f:
-                return json.load(f)
+            def _read():
+                with open(paper_metadata_path, "r") as f:
+                    return json.load(f)
+            return await asyncio.to_thread(_read)
         except json.JSONDecodeError:
             return {}
     return {}
 
-def save_paper_metadata(user_id: str, paper_metadata: Dict[str, Any]) -> None:
+async def save_paper_metadata(user_id: str, paper_metadata: Dict[str, Any]) -> None:
     user_dir = BASE_USER_DATA_DIR / user_id
     user_dir.mkdir(parents=True, exist_ok=True)
     paper_metadata_path = user_dir / "paper_metadata.json"
-    with open(paper_metadata_path, "w") as f:
-        json.dump(paper_metadata, f, indent=2)
+    def _write():
+        with open(paper_metadata_path, "w") as f:
+            json.dump(paper_metadata, f, indent=2)
+    await asyncio.to_thread(_write)
 
 def preprocess(user_id: str, doc: Document, arxiv_id: str) -> List[Document]:
     """
@@ -65,7 +70,7 @@ def preprocess(user_id: str, doc: Document, arxiv_id: str) -> List[Document]:
             chunks.append(c)
     return chunks
 
-def update_paper_metadata(user_id: str, paper_metadata: Dict[str, Any], doc_metadata: Dict[str, Any], arxiv_id: str, len_chunks: int) -> None:   
+async def update_paper_metadata(user_id: str, paper_metadata: Dict[str, Any], doc_metadata: Dict[str, Any], arxiv_id: str, len_chunks: int) -> None:   
     paper_metadata[arxiv_id] = {
                 'Title': doc_metadata.get('Title', 'Unknown'),
                 'Authors': doc_metadata.get('Authors', []),
@@ -75,9 +80,9 @@ def update_paper_metadata(user_id: str, paper_metadata: Dict[str, Any], doc_meta
                 'total_chunks': len_chunks,
                 'ingested_at': datetime.now().isoformat()  # Track when ingested
             }
-    save_paper_metadata(user_id, paper_metadata) 
+    await save_paper_metadata(user_id, paper_metadata) 
 
-def ingest_papers(user_id: str, paper_metadata: Dict[str, Any], vectorstore: QdrantVectorStore, arxiv_ids: List[str]) -> Dict[str, Any]:
+async def ingest_papers(user_id: str, paper_metadata: Dict[str, Any], vectorstore: QdrantVectorStore, arxiv_ids: List[str]) -> Dict[str, Any]:
     """
     Ingest multiple ArXiv papers, one by one.
     Each paper's chunks are added to Qdrant individually, and metadata is updated only if the add succeeds.
@@ -94,7 +99,7 @@ def ingest_papers(user_id: str, paper_metadata: Dict[str, Any], vectorstore: Qdr
 
         try:
             logging.info(f"📥 Loading paper {arxiv_id} from ArXiv")
-            docs = ArxivLoader(query=arxiv_id).load()
+            docs = await ArxivLoader(query=arxiv_id).aload()
             if not docs:
                 failed.append({"id": arxiv_id, "reason": "No content found on ArXiv"})
                 continue
@@ -103,10 +108,10 @@ def ingest_papers(user_id: str, paper_metadata: Dict[str, Any], vectorstore: Qdr
             chunks = preprocess(user_id, doc, arxiv_id)
 
             try:
-                # Add chunks to vector store
-                vectorstore.add_documents(chunks)
+                # Add chunks to vector store (async)
+                await vectorstore.aadd_documents(chunks)
                 # Only update metadata if add succeeds
-                update_paper_metadata(user_id, paper_metadata, doc.metadata, arxiv_id, len(chunks))
+                await update_paper_metadata(user_id, paper_metadata, doc.metadata, arxiv_id, len(chunks))
                 successful.append(arxiv_id)
                 logging.info(f"✅ Successfully ingested {arxiv_id}")
             except Exception as e:
@@ -128,14 +133,14 @@ def ingest_papers(user_id: str, paper_metadata: Dict[str, Any], vectorstore: Qdr
 
     return {"successful": successful, "failed": failed, "total_processed": total, "message": message}
 
-def save_notes(user_id: str, paper_metadata: Dict[str, Any], paper_id: str, text: str) -> bool:
+async def save_notes(user_id: str, paper_metadata: Dict[str, Any], paper_id: str, text: str) -> bool:
     if paper_id not in paper_metadata:
         return False
     paper_metadata[paper_id]["notes"] = text
-    save_paper_metadata(user_id, paper_metadata)  
+    await save_paper_metadata(user_id, paper_metadata)  
     return True
 
-def delete_paper(user_id: str, paper_metadata: Dict[str, Any], vectorstore: QdrantVectorStore, paper_id: str) -> bool:
+async def delete_paper(user_id: str, paper_metadata: Dict[str, Any], vectorstore: QdrantVectorStore, paper_id: str) -> bool:
     """
     Delete all chunks of a given paper from Qdrant and remove its metadata.
     Returns True if deletion succeeded, False otherwise.
@@ -151,14 +156,16 @@ def delete_paper(user_id: str, paper_metadata: Dict[str, Any], vectorstore: Qdra
                 models.FieldCondition(key="metadata.paper_id", match=models.MatchValue(value=paper_id)),
             ]
         )
-        # Delete points from vectorstore using filter
-        vectorstore.client.delete(
-            collection_name=vectorstore.collection_name,
-            points_selector=delete_filter
-        )
+        # Run delete in thread
+        def _delete():
+            vectorstore.client.delete(
+                collection_name=vectorstore.collection_name,
+                points_selector=delete_filter
+            )
+        await asyncio.to_thread(_delete)
         # Remove metadata
         del paper_metadata[paper_id]
-        save_paper_metadata(user_id, paper_metadata)
+        await save_paper_metadata(user_id, paper_metadata)
         logging.info(f"✅ Successfully deleted paper {paper_id} and its chunks.")
         return True
     
@@ -166,15 +173,18 @@ def delete_paper(user_id: str, paper_metadata: Dict[str, Any], vectorstore: Qdra
         logging.error(f"❌ Failed to delete chunks of {paper_id} from vector store: {e}")
         return False
 
-def get_num_vectors(user_id: str, vectorstore: QdrantVectorStore) -> int:
+async def get_num_vectors(user_id: str, vectorstore: QdrantVectorStore) -> int:
     """Return total number of vectors belonging to the user."""
     try:
-        result = vectorstore.client.count(
-            collection_name=vectorstore.collection_name,
-            count_filter=models.Filter(
-                must=[models.FieldCondition(key="metadata.user_id", match=models.MatchValue(value=user_id))]
+        # Run in thread
+        def _count():
+            return vectorstore.client.count(
+                collection_name=vectorstore.collection_name,
+                count_filter=models.Filter(
+                    must=[models.FieldCondition(key="metadata.user_id", match=models.MatchValue(value=user_id))]
+                )
             )
-        )
+        result = await asyncio.to_thread(_count)
         return result.count
     except Exception as e:
         return 0

@@ -20,7 +20,7 @@ def extract_clean_answer(content: str) -> str:
     # 4. Fallback: If no <answer> tag, remove <thinking> block
     return re.sub(r"<thinking>.*?</thinking>", "", content, flags=re.DOTALL | re.IGNORECASE).strip()
 
-def generate(state: State):
+async def generate(state: State):
     # Context with XML markers
     docs = state["retrievedDocs"]
     context_blocks = []
@@ -41,7 +41,7 @@ def generate(state: State):
 
     system_prompt = get_generation_prompt(context_xml, conversation_summary)
     user_question = state.get("rewrittenQuestion") or state.get("originalQuestion")
-    response = research_llm.invoke([
+    response = await research_llm.ainvoke([
         SystemMessage(content=system_prompt),
         HumanMessage(content=user_question)
     ])

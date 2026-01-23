@@ -13,7 +13,7 @@ from ui import (
     save_paper_notes
 )
 
-def chat_with_agent(message, history, user_id, user_metadata):
+async def chat_with_agent(message, history, user_id, user_metadata):
     """
     The bridge between Gradio and LangGraph.
     """
@@ -28,7 +28,7 @@ def chat_with_agent(message, history, user_id, user_metadata):
     
     inputs = {"messages": [("user", message)]}
     
-    for event in rag_workflow.stream(inputs, config=config, context=runtime_context):
+    async for event in rag_workflow.astream(inputs, config=config, context=runtime_context):
         for node_name, value in event.items():
             if "finalAnswer" in value:
                 yield value["finalAnswer"]
@@ -130,13 +130,13 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
             )
     
     # ------------------- Load papers on startup -------------------
-    def on_start():
+    async def on_start():
         """Load papers when the app starts/refreshes"""
         
         active_id = "demo_user" #TODO Get from request.username or login (in production) 
         
         # JSON metadata for the user
-        meta = load_paper_metadata(active_id) 
+        meta = await load_paper_metadata(active_id) 
         # Paper inventory display 
         samples, ids = prepare_dataset_samples(meta)
         

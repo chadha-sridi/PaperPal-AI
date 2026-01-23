@@ -3,7 +3,7 @@ from core.schemas import State
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from core.prompts import get_conversation_summary_prompt
 
-def summarize_conversation_history(state: State):
+async def summarize_conversation_history(state: State):
     """
     Summarize conversation history.
     """
@@ -24,7 +24,7 @@ def summarize_conversation_history(state: State):
         role = "User" if isinstance(msg, HumanMessage) else "Assistant"
         conversation += f"{role}: {msg.content}\n"
 
-    summary = llm.invoke([
+    summary = await llm.ainvoke([
         SystemMessage(content=get_conversation_summary_prompt()),
         HumanMessage(content=conversation),
     ])

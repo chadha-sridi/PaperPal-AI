@@ -26,7 +26,7 @@ def normalize_query_years(q_years: List[str], recent_window: int = 3) -> Set[int
             )
     return normalized_q_years 
 
-def fuzzy_match_papers(state: State, runtime: Runtime[RuntimeContext]) -> Dict[str, List[str]]:
+async def fuzzy_match_papers(state: State, runtime: Runtime[RuntimeContext]) -> Dict[str, List[str]]:
     """
     Select top-N paper IDs based on fuzzy matching between query hints and paper metadata.
     Args:
