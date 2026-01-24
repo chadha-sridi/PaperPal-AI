@@ -1,10 +1,18 @@
 import re
+import logging
 from core.schemas import State, RuntimeContext
 from rapidfuzz import fuzz
 from statistics import mean
 from datetime import datetime
 from typing import List, Dict, Set
 from langgraph.runtime import Runtime 
+logger = logging.getLogger(__name__)
+
+ARXIV_PATTERN = r'(?i)(?<!\d)(\d{4}\.\d{4,5}(?:v\d+)?|[a-z\-]+(?:\.[a-z]{2})?/\d{7}(?:v\d+)?)(?!\d)'
+
+def get_explicit_ids(user_query: str) -> set:
+    found = re.findall(ARXIV_PATTERN, user_query)
+    return {m[0].lower() if isinstance(m, tuple) else m.lower() for m in found}
 
 def extract_year(published):
     m = re.search(r"\d{4}", published)
@@ -35,15 +43,22 @@ async def fuzzy_match_papers(state: State, runtime: Runtime[RuntimeContext]) -> 
     Returns:
         top-N paper IDs ranked by fuzzy matching score
     """
+    user_query = state.get("originalQuestion", "")
     query_hints = state.get("metadataHints")
     metadata = runtime.context.metadata
     scope = state.get("paperScope", "multiple") 
     top_n = 2 if scope == "single" else 4 
-    # Return empty if no hints provided
+    
+    # Arxiv ids mentionned explicitly in the user's query
+    explicit_ids = get_explicit_ids(user_query)
+    if len(explicit_ids) >= top_n:
+        return {"arxivIDs": list(explicit_ids)}
+
+    # Return explicit ids (or empty) if no hints provided
     if query_hints is None or not any([
         query_hints.titles, query_hints.authors, query_hints.topics, query_hints.publicationYears
     ]):
-        return {"arxivIDs": []}
+        return {"arxivIDs": list(explicit_ids)}
 
     # Weights for each field
     weights = {
@@ -60,10 +75,16 @@ async def fuzzy_match_papers(state: State, runtime: Runtime[RuntimeContext]) -> 
     normalized_q_years =  normalize_query_years(q_years) 
     
     # Minimum score threshold 
-    MIN_THRESHOLD = 0.1
+    MIN_THRESHOLD = 0.3
     primary_scores = {} # Preselecting papers based on title and topics 
     scores = {} # Ordering based on total score 
     for paper_id, paper_data in metadata.items():
+        # Assign max score if the paper is explicitly mentionned 
+        if paper_id.lower() in explicit_ids:
+            primary_scores[paper_id] = 10.0
+            scores[paper_id] = 15.0
+            continue
+        
         primary_score = 0.0
         # --- Fuzzy match titles ---
         if q_titles:
