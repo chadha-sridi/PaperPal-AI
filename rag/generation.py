@@ -1,10 +1,13 @@
 import re
+import logging
 from config import research_llm
 from core.schemas import State
 from core.prompts import get_generation_prompt
 from langchain_core.messages import HumanMessage, SystemMessage
+logger = logging.getLogger(__name__)
 
 def extract_clean_answer(content: str) -> str:
+    logger.info("Generating response ... ")
     # 1. Find the start of the answer tag 
     tag = "<answer>"
     start_idx = content.lower().find(tag)

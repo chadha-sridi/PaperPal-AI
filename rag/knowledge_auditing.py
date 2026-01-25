@@ -28,6 +28,8 @@ async def audit_collective_knowledge(state: State):
     
     report = await auditor_llm.ainvoke(prompt)
     
+    logger.info(f"Corrective RAG report: {report}")
+    
     return {
         "relevancePassed": report.relevance_passed,
         "unanswered": report.unanswered_aspect if not report.relevance_passed else ""

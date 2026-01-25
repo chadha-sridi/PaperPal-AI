@@ -75,7 +75,7 @@ async def fuzzy_match_papers(state: State, runtime: Runtime[RuntimeContext]) -> 
     normalized_q_years =  normalize_query_years(q_years) 
     
     # Minimum score threshold 
-    MIN_THRESHOLD = 0.3
+    MIN_THRESHOLD = 1
     primary_scores = {} # Preselecting papers based on title and topics 
     scores = {} # Ordering based on total score 
     for paper_id, paper_data in metadata.items():
@@ -136,4 +136,11 @@ async def fuzzy_match_papers(state: State, runtime: Runtime[RuntimeContext]) -> 
     preselected_papers = sorted(primary_scores, key=lambda pid: primary_scores[pid], reverse=True)[:top_n]
     # Sort by score descending and return top_n
     top_papers = sorted(preselected_papers, key=lambda pid: scores[pid], reverse=True)[:top_n]
+    
+    logger.info(f"--- Fuzzy Match Results ({len(top_papers)} papers) ---")
+    for pid in top_papers:
+        title = metadata.get(pid, {}).get("Title", "No Title")
+        score = scores.get(pid, 0.0)
+        logger.info(f"ID: {pid} | Score: {score:.2f} | Title: {title}")
+
     return {"arxivIDs": top_papers}
