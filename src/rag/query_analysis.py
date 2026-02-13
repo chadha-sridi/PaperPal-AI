@@ -4,6 +4,12 @@ from core.schemas import State, QueryAnalysis
 from core.prompts import get_query_analysis_prompt
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 
+llm_structured = (
+    llm
+    .with_config(temperature=0.1)
+    .with_structured_output(QueryAnalysis)
+)
+
 async def analyze_query(state: State) -> dict:
     last_user_msg = state["messages"][-1].content
     summary = state.get("conversationSummary", "")
@@ -15,12 +21,6 @@ async def analyze_query(state: State) -> dict:
     User question:
     {last_user_msg}
     """.strip()
-
-    llm_structured = (
-        llm
-        .with_config(temperature=0.1)
-        .with_structured_output(QueryAnalysis)
-    )
 
     analysis: QueryAnalysis = await llm_structured.ainvoke([
         SystemMessage(content=get_query_analysis_prompt()),
